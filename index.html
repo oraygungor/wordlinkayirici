@@ -23,6 +23,14 @@
         .link-item {
             word-break: break-all;
         }
+        /* Checkbox stili */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #68D391;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #68D391;
+        }
     </style>
 </head>
 <body class="min-h-screen flex items-center justify-center py-10 px-4">
@@ -32,7 +40,7 @@
         <!-- Başlık Alanı -->
         <div class="bg-blue-600 p-6 text-white text-center">
             <h1 class="text-2xl font-bold mb-2"><i class="fa-solid fa-file-word mr-2"></i>Word Link Ayıklayıcı</h1>
-            <p class="opacity-90">Bir .docx dosyası yükleyin, içindeki tüm web adreslerini listeleyin.</p>
+            <p class="opacity-90">Bir .docx dosyası yükleyin, içindeki haber linklerini ayıklayın.</p>
         </div>
 
         <div class="p-8">
@@ -60,6 +68,18 @@
 
             <!-- Sonuç Alanı -->
             <div id="resultArea" class="hidden">
+                
+                <!-- Filtre Seçeneği -->
+                <div class="bg-blue-50 border border-blue-100 p-4 rounded-lg mb-4 flex items-center justify-between">
+                    <div class="flex items-center">
+                        <input type="checkbox" id="filterHomepages" checked class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500 border-gray-300 cursor-pointer">
+                        <label for="filterHomepages" class="ml-3 text-gray-700 font-medium cursor-pointer select-none">
+                            Sadece içerik sayfalarını göster <span class="text-gray-400 text-sm font-normal">(Anasayfaları gizle)</span>
+                        </label>
+                    </div>
+                    <span class="text-xs text-blue-600 font-semibold bg-blue-100 px-2 py-1 rounded">Önerilen</span>
+                </div>
+
                 <div class="flex justify-between items-center mb-4 border-b pb-2">
                     <h2 class="text-lg font-semibold text-gray-700">
                         Bulunan Linkler (<span id="linkCount" class="text-blue-600">0</span>)
@@ -84,9 +104,10 @@
 
             <!-- Sonuç Yok Mesajı -->
             <div id="noLinksMessage" class="hidden text-center py-8 text-gray-500 bg-gray-50 rounded-lg border border-dashed">
-                <i class="fa-solid fa-link-slash text-2xl mb-2"></i>
-                <p>Bu dosyada herhangi bir link bulunamadı.</p>
-                <button onclick="resetApp()" class="mt-2 text-blue-500 hover:underline text-sm">Yeni dosya dene</button>
+                <i class="fa-solid fa-filter text-2xl mb-2 text-gray-400"></i>
+                <p class="font-medium">Görüntülenecek link bulunamadı.</p>
+                <p class="text-sm mt-1">Filtre ayarlarını değiştirmeyi deneyebilirsiniz.</p>
+                <button onclick="resetApp()" class="mt-4 text-blue-500 hover:underline text-sm">Yeni dosya dene</button>
             </div>
         </div>
         
@@ -105,6 +126,14 @@
         const errorText = document.getElementById('errorText');
         const loading = document.getElementById('loading');
         const noLinksMessage = document.getElementById('noLinksMessage');
+        const filterCheckbox = document.getElementById('filterHomepages');
+
+        let allExtractedLinks = []; // Tüm ham linkleri burada tutacağız
+
+        // Checkbox değiştiğinde listeyi yeniden render et
+        filterCheckbox.addEventListener('change', () => {
+            renderLinks();
+        });
 
         // Sürükle Bırak Efektleri
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
@@ -149,7 +178,6 @@
             
             const file = files[0];
             
-            // Dosya tipi kontrolü
             if (file.type !== "application/vnd.openxmlformats-officedocument.wordprocessingml.document" && !file.name.endsWith('.docx')) {
                 showError("Lütfen geçerli bir .docx dosyası yükleyin.");
                 return;
@@ -169,7 +197,7 @@
                 const arrayBuffer = event.target.result;
 
                 mammoth.convertToHtml({arrayBuffer: arrayBuffer})
-                    .then(displayResult)
+                    .then(extractLinks)
                     .catch(handleError);
             };
 
@@ -182,44 +210,85 @@
             reader.readAsArrayBuffer(file);
         }
 
-        function displayResult(result) {
+        function extractLinks(result) {
             loading.classList.add('hidden');
-            const html = result.value; // Mammoth'un ürettiği HTML
+            const html = result.value;
             
-            // HTML stringini DOM elementine çevirip linkleri arayalım
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
             const anchors = doc.querySelectorAll('a');
             
-            const links = [];
+            allExtractedLinks = []; // Listeyi sıfırla
+
             anchors.forEach(a => {
-                const href = a.getAttribute('href');
-                // Sadece http/https veya www ile başlayan, veya mailto linklerini al
-                if (href && (href.startsWith('http') || href.startsWith('www') || href.startsWith('mailto:'))) {
-                    links.push(href);
+                let href = a.getAttribute('href');
+                if (href) {
+                    href = href.trim();
+                    // Sadece http/https linklerini al (mailto vb. hariç)
+                    if (href.startsWith('http://') || href.startsWith('https://')) {
+                        allExtractedLinks.push(href);
+                    }
                 }
             });
 
-            // Tekrarlanan linkleri temizlemek isterseniz aşağıdaki satırı açın:
-            // const uniqueLinks = [...new Set(links)]; 
-            const finalLinks = links; // Şimdilik hepsini gösteriyoruz (tekrarlar dahil)
+            // Linkleri ekrana bas
+            renderLinks();
+        }
 
-            if (finalLinks.length > 0) {
-                linkCount.innerText = finalLinks.length;
-                
-                finalLinks.forEach((link, index) => {
+        function renderLinks() {
+            linkList.innerHTML = ''; // Listeyi temizle
+            const shouldFilter = filterCheckbox.checked;
+
+            // Filtreleme Mantığı
+            const filteredLinks = allExtractedLinks.filter(link => {
+                if (!shouldFilter) return true; // Filtre kapalıysa hepsini göster
+
+                try {
+                    const urlObj = new URL(link);
+                    // Pathname "/" ise veya boşsa bu bir anasayfadır.
+                    // Uzunluğu 1'den büyükse (örn: /haber) içeriktir.
+                    return urlObj.pathname.length > 1;
+                } catch (e) {
+                    // URL bozuksa yine de gösterelim mi? 
+                    // Genelde bozuksa anasayfa değildir, gösterelim.
+                    return true;
+                }
+            });
+
+            linkCount.innerText = filteredLinks.length;
+
+            if (filteredLinks.length > 0) {
+                resultArea.classList.remove('hidden');
+                noLinksMessage.classList.add('hidden');
+
+                filteredLinks.forEach((link, index) => {
                     const li = document.createElement('li');
                     li.className = "flex items-start p-2 hover:bg-white rounded transition border-b border-gray-100 last:border-0";
                     li.innerHTML = `
                         <span class="text-gray-400 font-mono mr-3 text-sm mt-0.5">${index + 1}.</span>
-                        <a href="${link}" target="_blank" class="text-blue-600 hover:text-blue-800 hover:underline link-item text-sm flex-1 break-all">${link}</a>
+                        <div class="flex-1 min-w-0">
+                            <a href="${link}" target="_blank" class="text-blue-600 hover:text-blue-800 hover:underline link-item text-sm block truncate" title="${link}">
+                                ${link}
+                            </a>
+                        </div>
                     `;
                     linkList.appendChild(li);
                 });
-
-                resultArea.classList.remove('hidden');
             } else {
-                noLinksMessage.classList.remove('hidden');
+                // Link var ama filtre yüzünden hepsi gizlendiyse veya hiç link yoksa
+                resultArea.classList.remove('hidden'); // Alan görünsün ki filtreyi kapatabilsinler
+                linkList.innerHTML = ''; 
+                if (allExtractedLinks.length === 0) {
+                     // Gerçekten hiç link yok
+                     resultArea.classList.add('hidden');
+                     noLinksMessage.classList.remove('hidden');
+                } else {
+                    // Filtre yüzünden görünmüyor
+                    const li = document.createElement('li');
+                    li.className = "text-center text-gray-500 py-4 italic";
+                    li.innerText = "Filtre kriterlerine uyan link bulunamadı. Filtreyi kaldırarak anasayfa linklerini görebilirsiniz.";
+                    linkList.appendChild(li);
+                }
             }
         }
 
@@ -227,7 +296,7 @@
             loading.classList.add('hidden');
             dropZone.classList.remove('hidden');
             console.error(err);
-            showError("Dosya işlenirken bir hata oluştu. Dosyanın bozuk veya şifreli olmadığından emin olun.");
+            showError("Dosya işlenirken bir hata oluştu.");
         }
 
         function showError(msg) {
@@ -240,6 +309,7 @@
             resultArea.classList.add('hidden');
             noLinksMessage.classList.add('hidden');
             linkList.innerHTML = '';
+            allExtractedLinks = [];
         }
 
         function resetApp() {
@@ -249,11 +319,14 @@
         }
 
         function copyToClipboard() {
+            // Sadece ekranda o an görünen (filtrelenmiş) linkleri kopyala
             const links = document.querySelectorAll('#linkList a');
             let textToCopy = "";
             links.forEach(link => {
                 textToCopy += link.href + "\n";
             });
+
+            if (!textToCopy) return;
 
             const textArea = document.createElement("textarea");
             textArea.value = textToCopy;
