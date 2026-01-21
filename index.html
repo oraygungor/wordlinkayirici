@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Word Dosyası Link Ayıklayıcı</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Mammoth.js: .docx dosyalarını okumak için gerekli kütüphane -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f3f4f6;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .drop-zone {
+            transition: all 0.3s ease;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+        .link-item {
+            word-break: break-all;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center py-10 px-4">
+
+    <div class="bg-white rounded-xl shadow-xl w-full max-w-3xl overflow-hidden">
+        
+        <!-- Başlık Alanı -->
+        <div class="bg-blue-600 p-6 text-white text-center">
+            <h1 class="text-2xl font-bold mb-2"><i class="fa-solid fa-file-word mr-2"></i>Word Link Ayıklayıcı</h1>
+            <p class="opacity-90">Bir .docx dosyası yükleyin, içindeki tüm web adreslerini listeleyin.</p>
+        </div>
+
+        <div class="p-8">
+            <!-- Yükleme Alanı -->
+            <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-300 rounded-lg p-10 text-center cursor-pointer mb-6 relative">
+                <input type="file" id="fileInput" accept=".docx" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                <div class="text-gray-500">
+                    <i class="fa-solid fa-cloud-arrow-up text-4xl mb-3 text-blue-500"></i>
+                    <p class="text-lg font-medium">Dosyayı buraya sürükleyin veya tıklayıp seçin</p>
+                    <p class="text-sm mt-1 text-gray-400">Sadece .docx formatı desteklenir</p>
+                </div>
+            </div>
+
+            <!-- Hata Mesajı -->
+            <div id="errorMessage" class="hidden bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6" role="alert">
+                <p class="font-bold">Hata</p>
+                <p id="errorText">Bir hata oluştu.</p>
+            </div>
+
+            <!-- Yükleniyor Göstergesi -->
+            <div id="loading" class="hidden text-center py-4">
+                <i class="fa-solid fa-circle-notch fa-spin text-blue-500 text-3xl"></i>
+                <p class="text-gray-600 mt-2">Dosya taranıyor...</p>
+            </div>
+
+            <!-- Sonuç Alanı -->
+            <div id="resultArea" class="hidden">
+                <div class="flex justify-between items-center mb-4 border-b pb-2">
+                    <h2 class="text-lg font-semibold text-gray-700">
+                        Bulunan Linkler (<span id="linkCount" class="text-blue-600">0</span>)
+                    </h2>
+                    <button onclick="copyToClipboard()" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded text-sm transition flex items-center">
+                        <i class="fa-regular fa-copy mr-2"></i> Tümünü Kopyala
+                    </button>
+                </div>
+
+                <div class="bg-gray-50 rounded-lg p-4 border border-gray-200 max-h-96 overflow-y-auto">
+                    <ul id="linkList" class="space-y-2">
+                        <!-- Linkler buraya gelecek -->
+                    </ul>
+                </div>
+                
+                <div class="mt-4 text-right">
+                    <button onclick="resetApp()" class="text-gray-500 hover:text-red-500 text-sm underline">
+                        Temizle ve Yeni Dosya Yükle
+                    </button>
+                </div>
+            </div>
+
+            <!-- Sonuç Yok Mesajı -->
+            <div id="noLinksMessage" class="hidden text-center py-8 text-gray-500 bg-gray-50 rounded-lg border border-dashed">
+                <i class="fa-solid fa-link-slash text-2xl mb-2"></i>
+                <p>Bu dosyada herhangi bir link bulunamadı.</p>
+                <button onclick="resetApp()" class="mt-2 text-blue-500 hover:underline text-sm">Yeni dosya dene</button>
+            </div>
+        </div>
+        
+        <div class="bg-gray-100 p-3 text-center text-xs text-gray-500">
+            Gizlilik Notu: Dosyanız sunucuya yüklenmez, işlem tamamen tarayıcınızda gerçekleşir.
+        </div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const dropZone = document.getElementById('dropZone');
+        const resultArea = document.getElementById('resultArea');
+        const linkList = document.getElementById('linkList');
+        const linkCount = document.getElementById('linkCount');
+        const errorMessage = document.getElementById('errorMessage');
+        const errorText = document.getElementById('errorText');
+        const loading = document.getElementById('loading');
+        const noLinksMessage = document.getElementById('noLinksMessage');
+
+        // Sürükle Bırak Efektleri
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+        }
+
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            handleFiles(files);
+        }
+
+        fileInput.addEventListener('change', function() {
+            handleFiles(this.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length === 0) return;
+            
+            const file = files[0];
+            
+            // Dosya tipi kontrolü
+            if (file.type !== "application/vnd.openxmlformats-officedocument.wordprocessingml.document" && !file.name.endsWith('.docx')) {
+                showError("Lütfen geçerli bir .docx dosyası yükleyin.");
+                return;
+            }
+
+            processFile(file);
+        }
+
+        function processFile(file) {
+            resetUI();
+            loading.classList.remove('hidden');
+            dropZone.classList.add('hidden');
+
+            const reader = new FileReader();
+            
+            reader.onload = function(event) {
+                const arrayBuffer = event.target.result;
+
+                mammoth.convertToHtml({arrayBuffer: arrayBuffer})
+                    .then(displayResult)
+                    .catch(handleError);
+            };
+
+            reader.onerror = function() {
+                loading.classList.add('hidden');
+                dropZone.classList.remove('hidden');
+                showError("Dosya okunurken bir hata oluştu.");
+            }
+
+            reader.readAsArrayBuffer(file);
+        }
+
+        function displayResult(result) {
+            loading.classList.add('hidden');
+            const html = result.value; // Mammoth'un ürettiği HTML
+            
+            // HTML stringini DOM elementine çevirip linkleri arayalım
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const anchors = doc.querySelectorAll('a');
+            
+            const links = [];
+            anchors.forEach(a => {
+                const href = a.getAttribute('href');
+                // Sadece http/https veya www ile başlayan, veya mailto linklerini al
+                if (href && (href.startsWith('http') || href.startsWith('www') || href.startsWith('mailto:'))) {
+                    links.push(href);
+                }
+            });
+
+            // Tekrarlanan linkleri temizlemek isterseniz aşağıdaki satırı açın:
+            // const uniqueLinks = [...new Set(links)]; 
+            const finalLinks = links; // Şimdilik hepsini gösteriyoruz (tekrarlar dahil)
+
+            if (finalLinks.length > 0) {
+                linkCount.innerText = finalLinks.length;
+                
+                finalLinks.forEach((link, index) => {
+                    const li = document.createElement('li');
+                    li.className = "flex items-start p-2 hover:bg-white rounded transition border-b border-gray-100 last:border-0";
+                    li.innerHTML = `
+                        <span class="text-gray-400 font-mono mr-3 text-sm mt-0.5">${index + 1}.</span>
+                        <a href="${link}" target="_blank" class="text-blue-600 hover:text-blue-800 hover:underline link-item text-sm flex-1 break-all">${link}</a>
+                    `;
+                    linkList.appendChild(li);
+                });
+
+                resultArea.classList.remove('hidden');
+            } else {
+                noLinksMessage.classList.remove('hidden');
+            }
+        }
+
+        function handleError(err) {
+            loading.classList.add('hidden');
+            dropZone.classList.remove('hidden');
+            console.error(err);
+            showError("Dosya işlenirken bir hata oluştu. Dosyanın bozuk veya şifreli olmadığından emin olun.");
+        }
+
+        function showError(msg) {
+            errorMessage.classList.remove('hidden');
+            errorText.innerText = msg;
+        }
+
+        function resetUI() {
+            errorMessage.classList.add('hidden');
+            resultArea.classList.add('hidden');
+            noLinksMessage.classList.add('hidden');
+            linkList.innerHTML = '';
+        }
+
+        function resetApp() {
+            resetUI();
+            dropZone.classList.remove('hidden');
+            fileInput.value = '';
+        }
+
+        function copyToClipboard() {
+            const links = document.querySelectorAll('#linkList a');
+            let textToCopy = "";
+            links.forEach(link => {
+                textToCopy += link.href + "\n";
+            });
+
+            const textArea = document.createElement("textarea");
+            textArea.value = textToCopy;
+            document.body.appendChild(textArea);
+            textArea.select();
+            
+            try {
+                document.execCommand('copy');
+                const btn = document.querySelector('button[onclick="copyToClipboard()"]');
+                const originalContent = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-check mr-2"></i> Kopyalandı!';
+                btn.classList.replace('bg-green-500', 'bg-blue-600');
+                
+                setTimeout(() => {
+                    btn.innerHTML = originalContent;
+                    btn.classList.replace('bg-blue-600', 'bg-green-500');
+                }, 2000);
+            } catch (err) {
+                alert('Kopyalama başarısız oldu.');
+            }
+            
+            document.body.removeChild(textArea);
+        }
+    </script>
+</body>
+</html>
